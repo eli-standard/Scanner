@@ -28,5 +28,3 @@ def entropy_scorer(word: str) -> float:
     entropy_score *= -1
 
     return entropy_score
-
-print(entropy_scorer("lot"))
