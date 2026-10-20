@@ -111,7 +111,7 @@ def iter_files(
         dirpath = Path(dirpath_str)
 
         for name in sorted(filenames):
-            path = os.path.join(dirpath_str, name)
+            path = dirpath / name
             if path.suffix.lower() in SKIP_EXTENSIONS:
                 continue
 
