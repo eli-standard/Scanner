@@ -69,7 +69,7 @@ def _relative_path(candidate: Candidate, root: Path) -> Path:
 
 def _format_finding(candidate: Candidate, root: Path) -> str:
     rel = _relative_path(candidate, root)
-    return f"{rel.as_posix()}:{candidate.line_number}:{candidate.kind}:{candidate.value}"
+    return f"{rel.as_posix()}:{candidate.line_number}:{candidate.kind}"
 
 
 def _emit_gha_warning(candidate: Candidate, root: Path) -> None:
@@ -78,8 +78,7 @@ def _emit_gha_warning(candidate: Candidate, root: Path) -> None:
         return
     rel = _relative_path(candidate, root).as_posix()
     # Escape characters that break workflow command syntax
-    message = f"{candidate.kind}: {candidate.value}"
-    message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    message = candidate.kind.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print(
         f"::warning file={rel},line={candidate.line_number}::{message}",
         flush=True,
@@ -127,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         if unresolved:
             print(
                 f"To dismiss a false positive, add its fingerprint "
-                f"(path:kind:value) to {ALLOWLIST_FILENAME}",
+                f"(path:kind) to {ALLOWLIST_FILENAME}",
                 file=sys.stderr,
             )
 

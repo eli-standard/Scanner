@@ -71,16 +71,38 @@ SECRET_RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
     # Connection strings / auth material
     (
-        "postgres_connection_uri",
+        "connection_uri",
+        # Common DB / cache / broker URI schemes (with or without credentials).
         re.compile(
-            r"\bpostgres(?:ql)?://[^\s\"'<>\\]{8,}",
+            r"\b(?:"
+            r"postgres(?:ql)?|"
+            r"mongodb(?:\+srv)?|"
+            r"mysql|"
+            r"mariadb|"
+            r"mssql|"
+            r"sqlserver|"
+            r"oracle|"
+            r"cockroach(?:db)?|"
+            r"cassandra|"
+            r"neo4j|"
+            r"redis|rediss|"
+            r"amqp|amqps|"
+            r"jdbc:(?:postgres(?:ql)?|mysql|mariadb|sqlserver|oracle)"
+            r")://[^\s\"'<>\\]{8,}",
             re.IGNORECASE,
         ),
     ),
     (
-        "mongodb_connection_uri",
+        "credential_uri",
+        # Any URI scheme that embeds user:password@host (ftp, http(s), custom, …).
+        # Negative lookbehind avoids re-matching inside jdbc:<scheme>:// URIs.
         re.compile(
-            r"\bmongodb(?:\+srv)?://[^\s\"'<>\\]{8,}",
+            r"(?<!jdbc:)\b[a-z][a-z0-9+.-]*://"
+            r"[^\s\"'<>\\/@:]{0,64}"  # user (may be empty, e.g. redis://:pass@host)
+            r":"
+            r"[^\s\"'<>\\/@]{1,128}"  # password
+            r"@"
+            r"[^\s\"'<>\\]{3,}",  # host[/path…]
             re.IGNORECASE,
         ),
     ),
@@ -156,14 +178,27 @@ DEFAULT_MIN_CANDIDATE_LENGTH = 12
 
 @dataclass(frozen=True)
 class Candidate:
+    """A finding location. The matched secret itself is never retained."""
+
     path: Path
     line_number: int
-    value: str
     kind: str  # rule name, or generic: alnum_run | assignment | quoted
 
 
-def _dedupe_key(candidate: Candidate) -> tuple[Path, int, str, str]:
-    return (candidate.path, candidate.line_number, candidate.kind, candidate.value)
+@dataclass(frozen=True)
+class _EphemeralMatch:
+    """Line-local match used only while filtering; discarded before return."""
+
+    kind: str
+    value: str
+
+
+def _dedupe_key(candidate: Candidate) -> tuple[Path, int, str]:
+    return (candidate.path, candidate.line_number, candidate.kind)
+
+
+def _to_candidate(path: Path, line_number: int, match: _EphemeralMatch) -> Candidate:
+    return Candidate(path=path, line_number=line_number, kind=match.kind)
 
 
 _PLACEHOLDER_URI_PASSWORD = re.compile(
@@ -211,13 +246,9 @@ def _looks_like_code_value(value: str) -> bool:
     return False
 
 
-def _sensitive_assignments_in_line(
-    path: Path,
-    line_number: int,
-    line: str,
-) -> list[Candidate]:
+def _sensitive_assignments_in_line(line: str) -> list[_EphemeralMatch]:
     """Flag assignment values when the left-hand name looks secret-related."""
-    results: list[Candidate] = []
+    results: list[_EphemeralMatch] = []
     seen: set[str] = set()
 
     matches = list(_ASSIGNMENT_QUOTED.finditer(line)) + list(
@@ -235,14 +266,7 @@ def _sensitive_assignments_in_line(
         ):
             continue
         seen.add(value)
-        results.append(
-            Candidate(
-                path=path,
-                line_number=line_number,
-                value=value,
-                kind="sensitive_assignment",
-            )
-        )
+        results.append(_EphemeralMatch(kind="sensitive_assignment", value=value))
     return results
 
 
@@ -251,8 +275,12 @@ def find_secrets_in_line(
     line_number: int,
     line: str,
 ) -> list[Candidate]:
-    """Match known secret patterns on a single line."""
-    results: list[Candidate] = []
+    """Match known secret patterns on a single line.
+
+    Matched secret strings exist only as locals while this function runs; returned
+    ``Candidate`` objects keep path, line, and rule kind only.
+    """
+    results: list[_EphemeralMatch] = []
     seen_kinds: set[tuple[str, str]] = set()
 
     for rule_name, pattern in SECRET_RULES:
@@ -264,37 +292,41 @@ def find_secrets_in_line(
             if key in seen_kinds:
                 continue
             seen_kinds.add(key)
-            results.append(
-                Candidate(
-                    path=path,
-                    line_number=line_number,
-                    value=value,
-                    kind=rule_name,
-                )
-            )
+            results.append(_EphemeralMatch(kind=rule_name, value=value))
 
-    for candidate in _sensitive_assignments_in_line(path, line_number, line):
-        key = (candidate.kind, candidate.value)
+    for ephemeral in _sensitive_assignments_in_line(line):
+        key = (ephemeral.kind, ephemeral.value)
         if key in seen_kinds:
             continue
         seen_kinds.add(key)
-        results.append(candidate)
+        results.append(ephemeral)
 
     # Prefer vendor-specific rule names when the same value was also caught by
     # a generic assignment rule.
     specific_values = {
-        c.value for c in results if c.kind not in _GENERIC_KINDS
+        m.value for m in results if m.kind not in _GENERIC_KINDS
     }
     # Also drop "Bearer <token>" assignments when bearer_token already reported
     # the token itself.
-    bearer_values = {c.value for c in results if c.kind == "bearer_token"}
+    bearer_values = {m.value for m in results if m.kind == "bearer_token"}
     specific_values.update(f"Bearer {token}" for token in bearer_values)
 
-    return [
-        c
-        for c in results
-        if c.kind not in _GENERIC_KINDS or c.value not in specific_values
+    filtered = [
+        m
+        for m in results
+        if m.kind not in _GENERIC_KINDS or m.value not in specific_values
     ]
+
+    # Prefer connection_uri over credential_uri when both match the same string
+    # (e.g. postgres://user:pass@host).
+    connection_values = {m.value for m in filtered if m.kind == "connection_uri"}
+    final_matches = [
+        m
+        for m in filtered
+        if not (m.kind == "credential_uri" and m.value in connection_values)
+    ]
+
+    return [_to_candidate(path, line_number, m) for m in final_matches]
 
 
 def extract_generic_from_line(
@@ -319,9 +351,8 @@ def extract_generic_from_line(
         if value in seen:
             return
         seen.add(value)
-        results.append(
-            Candidate(path=path, line_number=line_number, value=value, kind=kind)
-        )
+        # value used only for dedupe/filter above; not stored on Candidate
+        results.append(Candidate(path=path, line_number=line_number, kind=kind))
 
     for match in _ASSIGNMENT.finditer(line):
         add(match.group("value"), "assignment")
@@ -388,7 +419,7 @@ def extract_from_paths(
 ) -> list[Candidate]:
     """Extract candidates from many files, de-duplicating identical hits."""
     all_candidates: list[Candidate] = []
-    seen: set[tuple[Path, int, str, str]] = set()
+    seen: set[tuple[Path, int, str]] = set()
 
     for path in paths:
         for candidate in extract_from_file(

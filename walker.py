@@ -78,7 +78,7 @@ SKIP_EXTENSIONS = frozenset(
 
 DEFAULT_MAX_FILE_BYTES = 1_048_576  # 1 MiB
 
-# Files that must not be scanned (e.g. allowlist entries mirror secret values)
+# Files that must not be scanned (scanner metadata, not source)
 SKIP_FILES = frozenset(
     {
         ".scanner-allowlist",
