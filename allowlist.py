@@ -9,15 +9,15 @@ from candidates import Candidate
 
 ALLOWLIST_FILENAME = ".scanner-allowlist"
 
-# Printed finding: path:line:kind:value
-_FULL_FINDING = re.compile(r"^(.+):(\d+):([^:]+):(.*)$")
-# Allowlist fingerprint: path:kind:value
-_FINGERPRINT = re.compile(r"^(.+):([^:]+):(.*)$")
+# Printed finding: path:line:kind
+_FULL_FINDING = re.compile(r"^(.+):(\d+):([^:]+)$")
+# Allowlist fingerprint: path:kind (line omitted so edits don't re-fail)
+_FINGERPRINT = re.compile(r"^(.+):([^:]+)$")
 
 
-def fingerprint(rel: Path | str, kind: str, value: str) -> str:
-    """Stable allowlist key (line numbers omitted so edits don't re-fail)."""
-    return f"{Path(rel).as_posix()}:{kind}:{value}"
+def fingerprint(rel: Path | str, kind: str) -> str:
+    """Stable allowlist key (no secret value; line numbers omitted)."""
+    return f"{Path(rel).as_posix()}:{kind}"
 
 
 def candidate_fingerprint(candidate: Candidate, root: Path) -> str:
@@ -25,7 +25,7 @@ def candidate_fingerprint(candidate: Candidate, root: Path) -> str:
         rel = candidate.path.resolve().relative_to(root.resolve())
     except ValueError:
         rel = candidate.path
-    return fingerprint(rel, candidate.kind, candidate.value)
+    return fingerprint(rel, candidate.kind)
 
 
 def normalize_allowlist_entry(line: str) -> str | None:
@@ -36,13 +36,13 @@ def normalize_allowlist_entry(line: str) -> str | None:
 
     full = _FULL_FINDING.match(text)
     if full:
-        path, _line, kind, value = full.groups()
-        return fingerprint(path, kind, value)
+        path, _line, kind = full.groups()
+        return fingerprint(path, kind)
 
     fp = _FINGERPRINT.match(text)
     if fp:
-        path, kind, value = fp.groups()
-        return fingerprint(path, kind, value)
+        path, kind = fp.groups()
+        return fingerprint(path, kind)
 
     return text
 
