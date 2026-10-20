@@ -78,6 +78,13 @@ SKIP_EXTENSIONS = frozenset(
 
 DEFAULT_MAX_FILE_BYTES = 1_048_576  # 1 MiB
 
+# Files that must not be scanned (e.g. allowlist entries mirror secret values)
+SKIP_FILES = frozenset(
+    {
+        ".scanner-allowlist",
+    }
+)
+
 # .egg-info directories are created by python packages when they are installed, 
 # but since they are named like "dirname.egg-info" we have to handle them directly
 def should_skip_dir(name: str) -> bool:
@@ -112,6 +119,8 @@ def iter_files(
 
         for name in sorted(filenames):
             path = dirpath / name
+            if name in SKIP_FILES:
+                continue
             if path.suffix.lower() in SKIP_EXTENSIONS:
                 continue
 
