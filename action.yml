@@ -1,0 +1,35 @@
+name: Secret Scanner
+description: Scan a repository for potential secret strings and fail on unresolved findings.
+author: COMP 5370 Scanner
+
+inputs:
+  path:
+    description: Root directory to scan (relative to the workspace).
+    required: false
+    default: "."
+  max-file-bytes:
+    description: Skip files larger than this many bytes.
+    required: false
+    default: "1048576"
+  min-length:
+    description: Minimum length for generic candidate strings.
+    required: false
+    default: "12"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Run secret scanner
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+      run: |
+        python "${{ github.action_path }}/scanner.py" \
+          "${{ inputs.path }}" \
+          --max-file-bytes "${{ inputs.max-file-bytes }}" \
+          --min-length "${{ inputs.min-length }}"
