@@ -18,6 +18,10 @@ from allowlist import (
 from candidates import Candidate, extract_from_paths
 from walker import DEFAULT_MAX_FILE_BYTES, iter_files
 
+_CRITICAL = 4
+_HIGH = 3
+_MODERATE = 2
+_LOW = 1
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -58,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="always exit 0 even when unresolved candidates are found",
     )
+    parser.add_argument(
+        "level",
+        nargs="?",
+        default=_CRITICAL,
+        help="shows files with the danger level above the level provided. Defaults to the most dangerous. Level 1: Low, Level 2: Medium, Level 3: High, Level 4: Dangerous",
+    )
     return parser
 
 
@@ -70,7 +80,7 @@ def _relative_path(candidate: Candidate, root: Path) -> Path:
 
 def _format_finding(candidate: Candidate, root: Path) -> str:
     rel = _relative_path(candidate, root)
-    return f"Path: {rel.as_posix()}\nLine: {candidate.line_number}\nCandidate Type: {candidate.kind}\n"
+    return f"Path: {rel.as_posix()}\nLine: {candidate.line_number}\nCandidate Type: {candidate.kind}\nLevel of Risk: {candidate.risk}\n"
 
 
 def _emit_gha_warning(candidate: Candidate, root: Path) -> None:
@@ -103,12 +113,22 @@ def main(argv: list[str] | None = None) -> int:
         if not args.quiet:
             print(f"\n{len(files)} file(s) would be scanned", file=sys.stderr)
         return 0
+
+    try:
+        danger = int(args.level)
+        if danger < 1 or danger > 4:
+            print("Invalid danger level. Defaulting to Critical")
+            danger = _CRITICAL
+    except (ValueError, TypeError) as exc:
+        print("Invalid danger level input. Defaulting to Critical")
+        danger = _CRITICAL
+    
     print("Welcome to the Secret Scanner!")
     print("============================================================")
     time.sleep(1)
     print("Scanning for secrets...")
     time.sleep(2)
-    candidates = extract_from_paths(files, min_length=args.min_length)
+    candidates = extract_from_paths(files, danger)
     allowlist = load_allowlist(root)
     unresolved, dismissed = partition_candidates(candidates, root, allowlist)
 
