@@ -42,7 +42,10 @@ jobs:
         #   path: "."
         #   max-file-bytes: "1048576"
         #   min-length: "12"
+        #   danger-level: "4"   # 1=low … 4=critical (default)
 ```
+
+Unresolved findings show up as PR annotations with a risk title (`Low` / `Moderate` / `High` / `Critical`). Known-pattern hits are annotated as errors; Shannon entropy hits use warnings (or errors when scored high/critical).
 
 Replace `YOUR_ORG` with your GitHub org or username. Pin to a tag (for example `@v1`) once you cut releases.
 
