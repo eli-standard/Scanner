@@ -39,4 +39,3 @@ runs:
           "${{ inputs.path }}" \
           "${{ inputs.danger-level }}" \
           --max-file-bytes "${{ inputs.max-file-bytes }}" \
-          --min-length "${{ inputs.min-length }}"
