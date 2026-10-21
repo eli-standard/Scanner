@@ -41,12 +41,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"skip files larger than this many bytes. most code files for a project aren't that big. bigger files tend to be stuff like logs that probably wouldn't have secrets. can change this as we want",
     )
     parser.add_argument(
-        "--min-length",
-        type=int,
-        default=12,
-        help="minimum length a string must be to be considered a potential secret. really more a debugging option cause there could be short strings that are still secrets",
-    )
-    parser.add_argument(
         "--list-files",
         action="store_true",
         help="just list the files that would be scanned without actually scanning",

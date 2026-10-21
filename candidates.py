@@ -164,8 +164,6 @@ _PLACEHOLDER_VALUE = re.compile(
     r")$"
 )
 
-DEFAULT_MIN_CANDIDATE_LENGTH = 12
-
 
 @dataclass(frozen=True)
 class Candidate:
