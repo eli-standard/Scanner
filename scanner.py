@@ -83,15 +83,24 @@ def _format_finding(candidate: Candidate, root: Path) -> str:
     return f"Path: {rel.as_posix()}\nLine: {candidate.line_number}\nCandidate Type: {candidate.kind}\nLevel of Risk: {candidate.risk}\n"
 
 
-def _emit_gha_warning(candidate: Candidate, root: Path) -> None:
-    """Emit a GitHub Actions warning annotation for an unresolved finding."""
+def _escape_gha(value: str) -> str:
+    """Escape characters that break GitHub Actions workflow command syntax."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _emit_gha_annotation(candidate: Candidate, root: Path) -> None:
+    """Emit a GitHub Actions annotation that includes kind and risk level."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return
     rel = _relative_path(candidate, root).as_posix()
-    # Escape characters that break workflow command syntax
-    message = candidate.kind.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    risk = (candidate.risk or "unknown").lower()
+    # Surface critical/high as errors so the PR Checks UI ranks them above
+    # moderate/low warnings from Shannon entropy hits.
+    command = "error" if risk in ("critical", "high") else "warning"
+    title = _escape_gha(f"{risk.capitalize()} risk")
+    message = _escape_gha(f"{candidate.kind} ({risk} risk)")
     print(
-        f"::warning file={rel},line={candidate.line_number}::{message}",
+        f"::{command} file={rel},line={candidate.line_number},title={title}::{message}",
         flush=True,
     )
 
@@ -142,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     for candidate in unresolved:
         time.sleep(0.15)
         print(_format_finding(candidate, root))
-        _emit_gha_warning(candidate, root)
+        _emit_gha_annotation(candidate, root)
 
     if not args.quiet:
         print(
