@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from Shannon_entropy_score_calculator import entropy_scorer
 
 # ---------------------------------------------------------------------------
 # High-confidence secret regex rules (name, pattern)
@@ -163,16 +164,6 @@ _PLACEHOLDER_VALUE = re.compile(
     r")$"
 )
 
-# ---------------------------------------------------------------------------
-# Generic candidate patterns (for a future Shannon-entropy pass)
-# ---------------------------------------------------------------------------
-
-_ALNUM_RUN = re.compile(r"[A-Za-z0-9_\-+/=]{16,}")
-_ASSIGNMENT = re.compile(
-    r"""(?P<key>[A-Za-z_][A-Za-z0-9_.-]{0,64})\s*[=:]\s*["'](?P<value>[^"']{8,})["']"""
-)
-_QUOTED = re.compile(r"""["']([^"']{12,})["']""")
-
 DEFAULT_MIN_CANDIDATE_LENGTH = 12
 
 
@@ -183,6 +174,7 @@ class Candidate:
     path: Path
     line_number: int
     kind: str  # rule name, or generic: alnum_run | assignment | quoted
+    risk: str   # risk level: low | moderate | high | critical
 
 
 @dataclass(frozen=True)
@@ -193,12 +185,12 @@ class _EphemeralMatch:
     value: str
 
 
-def _dedupe_key(candidate: Candidate) -> tuple[Path, int, str]:
-    return (candidate.path, candidate.line_number, candidate.kind)
+def _dedupe_key(candidate: Candidate) -> tuple[Path, int, str, str]:
+    return (candidate.path, candidate.line_number, candidate.kind, candidate.risk)
 
 
-def _to_candidate(path: Path, line_number: int, match: _EphemeralMatch) -> Candidate:
-    return Candidate(path=path, line_number=line_number, kind=match.kind)
+def _to_candidate(path: Path, line_number: int, match: _EphemeralMatch, risk: str) -> Candidate:
+    return Candidate(path=path, line_number=line_number, kind=match.kind, risk=risk)
 
 
 _PLACEHOLDER_URI_PASSWORD = re.compile(
@@ -274,6 +266,7 @@ def find_secrets_in_line(
     path: Path,
     line_number: int,
     line: str,
+    danger_level: int,
 ) -> list[Candidate]:
     """Match known secret patterns on a single line.
 
@@ -282,6 +275,7 @@ def find_secrets_in_line(
     """
     results: list[_EphemeralMatch] = []
     seen_kinds: set[tuple[str, str]] = set()
+    risk = None
 
     for rule_name, pattern in SECRET_RULES:
         for match in pattern.finditer(line):
@@ -292,6 +286,7 @@ def find_secrets_in_line(
             if key in seen_kinds:
                 continue
             seen_kinds.add(key)
+            risk = "critical"
             results.append(_EphemeralMatch(kind=rule_name, value=value))
 
     for ephemeral in _sensitive_assignments_in_line(line):
@@ -299,7 +294,22 @@ def find_secrets_in_line(
         if key in seen_kinds:
             continue
         seen_kinds.add(key)
+        risk = "critical"
         results.append(ephemeral)
+
+    if not results:
+        if danger_level < 4:
+            line_score = entropy_scorer(line)
+
+            if line_score >= 5:
+                risk = "high"
+            elif danger_level < 3 and line_score >= 4.5:
+                risk = "moderate"
+            elif danger_level < 2 and line_score >= 4:
+                risk = "low"
+
+            if risk is not None:
+                results.append(_EphemeralMatch(kind="entropy", value=line))
 
     # Prefer vendor-specific rule names when the same value was also caught by
     # a generic assignment rule.
@@ -326,51 +336,14 @@ def find_secrets_in_line(
         if not (m.kind == "credential_uri" and m.value in connection_values)
     ]
 
-    return [_to_candidate(path, line_number, m) for m in final_matches]
-
-
-def extract_generic_from_line(
-    path: Path,
-    line_number: int,
-    line: str,
-    min_length: int = DEFAULT_MIN_CANDIDATE_LENGTH,
-) -> list[Candidate]:
-    """
-    Pull generic candidate strings for entropy scoring.
-
-    Kept separate from regex rules so the Shannon pass can consume these without
-    depending on vendor-specific patterns.
-    """
-    results: list[Candidate] = []
-    seen: set[str] = set()
-
-    def add(value: str, kind: str) -> None:
-        value = value.strip()
-        if len(value) < min_length or is_placeholder(value):
-            return
-        if value in seen:
-            return
-        seen.add(value)
-        # value used only for dedupe/filter above; not stored on Candidate
-        results.append(Candidate(path=path, line_number=line_number, kind=kind))
-
-    for match in _ASSIGNMENT.finditer(line):
-        add(match.group("value"), "assignment")
-
-    for match in _QUOTED.finditer(line):
-        add(match.group(1), "quoted")
-
-    for match in _ALNUM_RUN.finditer(line):
-        add(match.group(0), "alnum_run")
-
-    return results
+    return [_to_candidate(path, line_number, m, risk) for m in final_matches]
 
 
 def extract_from_line(
     path: Path,
     line_number: int,
     line: str,
-    min_length: int = DEFAULT_MIN_CANDIDATE_LENGTH,
+    danger_level: int,
     include_generic: bool = False,
 ) -> list[Candidate]:
     """
@@ -379,18 +352,13 @@ def extract_from_line(
     By default returns regex rule hits only. Set include_generic=True to also
     emit entropy-oriented candidates.
     """
-    results = find_secrets_in_line(path, line_number, line)
-    if include_generic:
-        results.extend(
-            extract_generic_from_line(path, line_number, line, min_length=min_length)
-        )
+    results = find_secrets_in_line(path, line_number, line, danger_level)
     return results
 
 
 def extract_from_file(
     path: Path,
-    min_length: int = DEFAULT_MIN_CANDIDATE_LENGTH,
-    include_generic: bool = False,
+    danger_level: int,
 ) -> list[Candidate]:
     """Read a text file and return secret candidates with line numbers."""
     try:
@@ -405,8 +373,7 @@ def extract_from_file(
                 path,
                 line_number,
                 line,
-                min_length=min_length,
-                include_generic=include_generic,
+                danger_level,
             )
         )
     return candidates
@@ -414,8 +381,7 @@ def extract_from_file(
 
 def extract_from_paths(
     paths: list[Path],
-    min_length: int = DEFAULT_MIN_CANDIDATE_LENGTH,
-    include_generic: bool = False,
+    danger_level: int,
 ) -> list[Candidate]:
     """Extract candidates from many files, de-duplicating identical hits."""
     all_candidates: list[Candidate] = []
@@ -424,8 +390,7 @@ def extract_from_paths(
     for path in paths:
         for candidate in extract_from_file(
             path,
-            min_length=min_length,
-            include_generic=include_generic,
+            danger_level,
         ):
             key = _dedupe_key(candidate)
             if key in seen:
