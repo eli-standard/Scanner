@@ -7,6 +7,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+import time
 
 from allowlist import (
     ALLOWLIST_FILENAME,
@@ -69,7 +70,7 @@ def _relative_path(candidate: Candidate, root: Path) -> Path:
 
 def _format_finding(candidate: Candidate, root: Path) -> str:
     rel = _relative_path(candidate, root)
-    return f"{rel.as_posix()}:{candidate.line_number}:{candidate.kind}"
+    return f"Path: {rel.as_posix()}\nLine: {candidate.line_number}\nCandidate Type: {candidate.kind}\n"
 
 
 def _emit_gha_warning(candidate: Candidate, root: Path) -> None:
@@ -102,7 +103,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.quiet:
             print(f"\n{len(files)} file(s) would be scanned", file=sys.stderr)
         return 0
-
+    print("Welcome to the Secret Scanner!")
+    print("============================================================")
+    time.sleep(1)
+    print("Scanning for secrets...")
+    time.sleep(2)
     candidates = extract_from_paths(files, min_length=args.min_length)
     allowlist = load_allowlist(root)
     unresolved, dismissed = partition_candidates(candidates, root, allowlist)
@@ -111,8 +116,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.quiet:
             fp = candidate_fingerprint(candidate, root)
             print(f"dismissed: {fp}", file=sys.stderr)
-
+    print("============================================================")
+    print("Unresolved findings:")
+    print("============================================================")
     for candidate in unresolved:
+        time.sleep(0.15)
         print(_format_finding(candidate, root))
         _emit_gha_warning(candidate, root)
 
