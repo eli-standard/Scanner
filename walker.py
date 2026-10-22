@@ -82,6 +82,10 @@ DEFAULT_MAX_FILE_BYTES = 1_048_576  # 1 MiB
 SKIP_FILES = frozenset(
     {
         ".scanner-allowlist",
+        "readme",
+        "readme.md",
+        "readme.rst",
+        "readme.txt",
     }
 )
 
@@ -119,7 +123,7 @@ def iter_files(
 
         for name in sorted(filenames):
             path = dirpath / name
-            if name in SKIP_FILES:
+            if name.lower() in SKIP_FILES:
                 continue
             if path.suffix.lower() in SKIP_EXTENSIONS:
                 continue
