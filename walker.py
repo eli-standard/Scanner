@@ -90,6 +90,26 @@ SKIP_FILES = frozenset(
     }
 )
 
+# Example/template dotenv files are safe to commit; real .env* files are not.
+_SAFE_DOTENV_NAMES = frozenset(
+    {
+        ".env.example",
+        ".env.template",
+    }
+)
+
+
+def is_dotenv_file(name: str) -> bool:
+    """Return True for committed dotenv files (.env, .env.local, …).
+
+    Template names like .env.example are excluded — those are meant to be
+    checked in without real secrets.
+    """
+    lower = name.lower()
+    if lower in _SAFE_DOTENV_NAMES:
+        return False
+    return lower == ".env" or lower.startswith(".env.")
+
 # .egg-info directories are created by python packages when they are installed, 
 # but since they are named like "dirname.egg-info" we have to handle them directly
 def should_skip_dir(name: str) -> bool:

@@ -16,7 +16,7 @@ from allowlist import (
     partition_candidates,
 )
 from candidates import Candidate, extract_from_paths
-from walker import DEFAULT_MAX_FILE_BYTES, iter_files
+from walker import DEFAULT_MAX_FILE_BYTES, is_dotenv_file, iter_files
 
 _CRITICAL = 4
 _HIGH = 3
@@ -99,6 +99,28 @@ def _emit_gha_annotation(candidate: Candidate, root: Path) -> None:
     )
 
 
+def _emit_dotenv_error(path: Path, root: Path) -> None:
+    """Report that a .env file itself should not be committed."""
+    try:
+        rel = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        rel = path.as_posix()
+    print(
+        f"ERROR: A .env file has been committed to the repository: {rel}\n"
+        f"Remove it from version control and add it to .gitignore.\n"
+    )
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    message = _escape_gha(
+        "A .env file has been committed to the repository. "
+        "Remove it from version control and add it to .gitignore."
+    )
+    print(
+        f"::error file={rel},title=Committed .env file::{message}",
+        flush=True,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -131,7 +153,12 @@ def main(argv: list[str] | None = None) -> int:
     time.sleep(1)
     print("Scanning for secrets...")
     time.sleep(2)
-    candidates = extract_from_paths(files, danger)
+
+    # .env files are a hard fail on their own — don't list their secrets.
+    dotenv_files = [path for path in files if is_dotenv_file(path.name)]
+    scan_files = [path for path in files if not is_dotenv_file(path.name)]
+
+    candidates = extract_from_paths(scan_files, danger)
     allowlist = load_allowlist(root)
     unresolved, dismissed = partition_candidates(candidates, root, allowlist)
 
@@ -142,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     print("============================================================")
     print("Unresolved findings:")
     print("============================================================")
+    for path in dotenv_files:
+        time.sleep(0.15)
+        _emit_dotenv_error(path, root)
     for candidate in unresolved:
         time.sleep(0.15)
         print(_format_finding(candidate, root))
@@ -149,9 +179,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.quiet:
         print(
-            f"\nScanned {len(files)} file(s); "
+            f"\nScanned {len(scan_files)} file(s); "
             f"found {len(candidates)} candidate(s) "
-            f"({len(unresolved)} unresolved, {len(dismissed)} dismissed)",
+            f"({len(unresolved)} unresolved, {len(dismissed)} dismissed)"
+            + (
+                f"; {len(dotenv_files)} committed .env file(s)"
+                if dotenv_files
+                else ""
+            ),
             file=sys.stderr,
         )
         if unresolved:
@@ -161,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-    if unresolved and not args.no_fail:
+    if (unresolved or dotenv_files) and not args.no_fail:
         return 1
     return 0
 
