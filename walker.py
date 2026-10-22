@@ -86,6 +86,7 @@ SKIP_FILES = frozenset(
         "readme.md",
         "readme.rst",
         "readme.txt",
+        "package-lock.json",
     }
 )
 
