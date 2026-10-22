@@ -342,7 +342,6 @@ def extract_from_line(
     line_number: int,
     line: str,
     danger_level: int,
-    include_generic: bool = False,
 ) -> list[Candidate]:
     """
     Scan one line for secrets.

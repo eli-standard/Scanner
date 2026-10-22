@@ -19,9 +19,6 @@ from candidates import Candidate, extract_from_paths
 from walker import DEFAULT_MAX_FILE_BYTES, iter_files
 
 _CRITICAL = 4
-_HIGH = 3
-_MODERATE = 2
-_LOW = 1
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
